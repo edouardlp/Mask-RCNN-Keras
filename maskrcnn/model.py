@@ -5,12 +5,12 @@ import keras
 import numpy as np
 import json
 
-from subgraphs.fpn_backbone_graph import BackboneGraph
-from subgraphs.rpn_graph import RPNGraph
-from subgraphs.proposal_layer import ProposalLayer
-from subgraphs.fpn_classifier_graph import FPNClassifierGraph
-from subgraphs.fpn_mask_graph import FPNMaskGraph
-from subgraphs.detection_layer import DetectionLayer
+from .subgraphs.fpn_backbone_graph import BackboneGraph
+from .subgraphs.rpn_graph import RPNGraph
+from .subgraphs.proposal_layer import ProposalLayer
+from .subgraphs.fpn_classifier_graph import FPNClassifierGraph
+from .subgraphs.fpn_mask_graph import FPNMaskGraph
+from .subgraphs.detection_layer import DetectionLayer
 
 def build_models(config_path,
                  weights_path):
