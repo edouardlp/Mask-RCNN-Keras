@@ -3,7 +3,7 @@ import os
 from setuptools import setup
 from setuptools import find_packages
 
-NAME = 'mask-rcnn'
+NAME = 'maskrcnn'
 DESCRIPTION = 'Mask-RCNN Keras'
 URL = 'https://github.com/edouardlp/Mask-RCNN-Keras'
 EMAIL = 'ed@laveryplante.com'
