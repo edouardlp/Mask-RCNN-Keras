@@ -1,5 +1,11 @@
-import keras
 import tensorflow as tf
+if tf.__version__ == '1.5.0':
+    import keras
+    from keras.engine import Layer
+else:
+    from tensorflow import keras
+    from tensorflow.keras.layers import Layer
+
 import numpy as np
 import math
 
@@ -11,7 +17,7 @@ from .utils import norm_boxes_graph
 #NOTE: None of this will get exported to CoreML. This is only useful for python inference, and for CoreML to determine
 #input and output shapes.
 
-class ProposalLayer(keras.engine.Layer):
+class ProposalLayer(Layer):
     """Receives anchor scores and selects a subset to pass as proposals
     to the second stage. Filtering is done based on anchor scores and
     non-max suppression to remove overlaps. It also applies bounding
@@ -27,25 +33,31 @@ class ProposalLayer(keras.engine.Layer):
     """
 
     def __init__(self,
-                 image_shape,
-                 max_proposals,
-                 pre_nms_max_proposals,
-                 bounding_box_std_dev,
-                 nms_threshold,
-                 anchor_scales,
-                 anchor_ratios,
-                 backbone_strides,
-                 anchor_stride,
+                 image_shape=None,
+                 max_proposals=None,
+                 pre_nms_max_proposals=None,
+                 bounding_box_std_dev=None,
+                 nms_threshold=None,
+                 anchor_scales=None,
+                 anchor_ratios=None,
+                 backbone_strides=None,
+                 anchor_stride=None,
                  **kwargs):
 
         super(ProposalLayer, self).__init__(**kwargs)
 
-        self.images_per_gpu = 1
-
-        self.bounding_box_std_dev = bounding_box_std_dev
-        self.pre_nms_max_proposals = pre_nms_max_proposals
+        self.image_shape = image_shape
         self.max_proposals = max_proposals
+        self.pre_nms_max_proposals = pre_nms_max_proposals
+        self.bounding_box_std_dev = bounding_box_std_dev
         self.nms_threshold = nms_threshold
+        self.anchor_scales = anchor_scales
+        self.anchor_ratios = anchor_ratios
+        self.backbone_strides = backbone_strides
+        self.anchor_stride = anchor_stride
+        assert max_proposals != None
+
+        self.images_per_gpu = 1
 
         backbone_shapes = np.array(
         [[int(math.ceil(image_shape[0] / stride)),
@@ -57,6 +69,19 @@ class ProposalLayer(keras.engine.Layer):
                                                 backbone_shapes,
                                                 backbone_strides,
                                                 anchor_stride), image_shape)
+
+    def get_config(self):
+        config = super(ProposalLayer, self).get_config()
+        config['image_shape'] = self.image_shape
+        config['max_proposals'] = self.max_proposals
+        config['pre_nms_max_proposals'] = self.pre_nms_max_proposals
+        config['bounding_box_std_dev'] = self.bounding_box_std_dev
+        config['nms_threshold'] = self.nms_threshold
+        config['anchor_scales'] = self.anchor_scales
+        config['anchor_ratios'] = self.anchor_ratios
+        config['backbone_strides'] = self.backbone_strides
+        config['anchor_stride'] = self.anchor_stride
+        return config
 
     def call(self, inputs):
         # Box Scores. Use the foreground class confidence. [Batch, num_rois, 1]

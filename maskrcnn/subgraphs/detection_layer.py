@@ -1,5 +1,10 @@
-import keras
 import tensorflow as tf
+if tf.__version__ == '1.5.0':
+    import keras
+    from keras.engine import Layer
+else:
+    from tensorflow import keras
+    from tensorflow.keras.layers import Layer
 import numpy as np
 
 from .utils import batch_slice
@@ -113,7 +118,7 @@ def refine_detections_graph(rois,
     return tf.reshape(detections, (-1,6))
 
 
-class DetectionLayer(keras.engine.Layer):
+class DetectionLayer(Layer):
     """Takes classified proposal boxes and their bounding box deltas and
     returns the final detection boxes.
 
@@ -128,19 +133,25 @@ class DetectionLayer(keras.engine.Layer):
                  detection_min_confidence,
                  detection_nms_threshold, **kwargs):
         super(DetectionLayer, self).__init__(**kwargs)
-        #TODO: since this is inference only, we may want to remove this
         self.images_per_gpu = 1
         self.batch_size = 1
         self.max_detections = max_detections
         self.bounding_box_std_dev = bounding_box_std_dev
         self.detection_min_confidence = detection_min_confidence
         self.detection_nms_threshold = detection_nms_threshold
+        assert max_detections != None
+
+    def get_config(self):
+        config = super(DetectionLayer, self).get_config()
+        config['max_detections'] = self.max_detections
+        config['bounding_box_std_dev'] = self.bounding_box_std_dev
+        config['detection_min_confidence'] = self.detection_min_confidence
+        config['detection_nms_threshold'] = self.detection_nms_threshold
+        return config
 
     def call(self, inputs):
         rois = inputs[0]
         classifications = inputs[1]
-        #mrcnn_bbox = inputs[2]
-        #mrcnn_bbox = keras.layers.Permute((3, 2, 1))(mrcnn_bbox)
         # Get windows of images in normalized coordinates. Windows are the area
         # in the image that excludes the padding.
         # Use the shape of the first image in the batch to normalize the window
@@ -164,9 +175,9 @@ class DetectionLayer(keras.engine.Layer):
         # Reshape output
         # [batch, num_detections, (y1, x1, y2, x2, class_id, class_score)] in
         # normalized coordinates
-        detections = tf.reshape(
-            detections_batch,
-            [self.batch_size, self.max_detections, 6])
+        detections = keras.layers.Lambda(lambda x: tf.reshape(
+            x,
+            [self.batch_size, self.max_detections, 6]))(detections_batch)
         return detections
 
     def compute_output_shape(self, input_shape):

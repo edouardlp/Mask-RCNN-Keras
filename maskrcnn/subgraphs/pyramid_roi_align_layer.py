@@ -1,5 +1,10 @@
-import keras
 import tensorflow as tf
+if tf.__version__ == '1.5.0':
+    import keras
+    from keras.engine import Layer
+else:
+    from tensorflow import keras
+    from tensorflow.keras.layers import Layer
 
 #NOTE: None of this will get exported to CoreML. This is only useful for python inference, and for CoreML to determine
 #input and output shapes.
@@ -8,7 +13,7 @@ def log2_graph(x):
     """Implementation of Log2. TF doesn't have a native implementation."""
     return tf.log(x) / tf.log(2.0)
 
-class PyramidROIAlign(keras.engine.Layer):
+class PyramidROIAlign(Layer):
     """Implements ROI Pooling on multiple levels of the feature pyramid.
 
     Params:
@@ -33,6 +38,13 @@ class PyramidROIAlign(keras.engine.Layer):
         super(PyramidROIAlign, self).__init__(**kwargs)
         self.pool_shape = tuple(pool_shape)
         self.image_shape = image_shape
+        assert image_shape != None
+
+    def get_config(self):
+        config = super(PyramidROIAlign, self).get_config()
+        config['pool_shape'] = self.pool_shape
+        config['image_shape'] = self.image_shape
+        return config
 
     def call(self, inputs):
         # Crop boxes [batch, num_boxes, (y1, x1, y2, x2)] in normalized coords

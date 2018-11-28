@@ -1,4 +1,8 @@
-import keras
+import tensorflow as tf
+if tf.__version__ == '1.5.0':
+    import keras
+else:
+    from tensorflow import keras
 
 class RPNGraph():
 
