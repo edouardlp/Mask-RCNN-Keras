@@ -131,7 +131,8 @@ class DetectionLayer(Layer):
                  max_detections,
                  bounding_box_std_dev,
                  detection_min_confidence,
-                 detection_nms_threshold, **kwargs):
+                 detection_nms_threshold,
+                 **kwargs):
         super(DetectionLayer, self).__init__(**kwargs)
         self.images_per_gpu = 1
         self.batch_size = 1
