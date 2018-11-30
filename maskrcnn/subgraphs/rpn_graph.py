@@ -16,7 +16,7 @@ class RPNGraph():
         self.depth = depth
         self.feature_maps = feature_maps
 
-    def build(self):
+    def build(self, environment):
 
         anchor_stride = self.anchor_stride
         anchors_per_location = self.anchors_per_location

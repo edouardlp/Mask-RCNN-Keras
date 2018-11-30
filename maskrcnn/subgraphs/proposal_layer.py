@@ -139,7 +139,7 @@ class ProposalLayer(Layer):
         proposals = batch_slice([boxes, scores], nms,
                                       self.images_per_gpu)
 
-        proposals = keras.layers.Reshape((self.max_proposals,4))(proposals)
+        proposals = keras.layers.Reshape((self.max_proposals,4), name="proposals")(proposals)
 
         return proposals
 

@@ -4,10 +4,13 @@ class MaskRCNNImageInfo():
 
     def __init__(self,
                  id,
-                 original_shape):
+                 original_shape,
+                 window_shape):
 
         self.id = id
         self.original_shape = original_shape
+        self.window_shape = window_shape
+
 
 class MaskRCNNResult():
 
@@ -28,23 +31,21 @@ class MaskRCNNDetectionResult():
                  class_label,
                  bounding_box,
                  mask):
-
         self.probability = probability
         self.class_id = class_id
         self.class_label = class_label
         self.bounding_box = bounding_box
         self.mask = mask
 
-
 def _results_from_tensor_values(values,
                                 dataset_id,
-                                image_info_fn,
                                 class_label_fn):
 
     results = []
     for index,value in enumerate(values):
-
-        image_info = image_info_fn(index)
+        image_info = MaskRCNNImageInfo(value["input_id"].decode('utf-8'),
+                                       value["input_original_shape"],
+                                       value["input_window_shape"])
         raw_detections = value["detections"]
         masks = value["masks"]
         masks = np.transpose(masks, axes=[2, 1, 0])
@@ -70,4 +71,4 @@ def _results_from_tensor_values(values,
                                     image_info=image_info,
                                     detections=detections)
         results.append(result)
-        return results
+    return results

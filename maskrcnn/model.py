@@ -15,9 +15,15 @@ from .subgraphs.detection_layer import DetectionLayer
 
 from .results import _results_from_tensor_values
 
-def _build_keras_models(mode):
+class EnvironmentKeys(object):
+  ESTIMATOR = 'tf.estimator'
+  CORE_ML = 'coreml'
 
-    assert mode in ["tf.estimator", "coreml"]
+
+def _build_keras_models(environment):
+
+    assert environment in [EnvironmentKeys.ESTIMATOR,
+                           EnvironmentKeys.CORE_ML]
 
     architecture = 'resnet101'
     input_width = 1024
@@ -47,7 +53,7 @@ def _build_keras_models(mode):
                              architecture=architecture,
                              pyramid_size=pyramid_top_down_size)
 
-    P2, P3, P4, P5, P6 = backbone.build()
+    P2, P3, P4, P5, P6 = backbone.build(environment=environment)
 
     rpn = RPNGraph(anchor_stride=anchor_stride,
                    anchors_per_location=anchors_per_location,
@@ -56,7 +62,7 @@ def _build_keras_models(mode):
 
     # anchor_object_probs: Probability of each anchor containing only background or objects
     # anchor_deltas: Bounding box refinements to apply to each anchor to better enclose its object
-    anchor_object_probs, anchor_deltas = rpn.build()
+    anchor_object_probs, anchor_deltas = rpn.build(environment=environment)
 
     # rois: Regions of interest (regions of the image that probably contain an object)
     proposal_layer = ProposalLayer(name="ROI",
@@ -85,7 +91,7 @@ def _build_keras_models(mode):
 
     # rois_class_probs: Probability of each class being contained within the roi
     # rois_deltas: Bounding box refinements to apply to each roi to better enclose its object
-    fpn_classifier_model, classification = fpn_classifier_graph.build()
+    fpn_classifier_model, classification = fpn_classifier_graph.build(environment=environment)
 
     detections = DetectionLayer(name="detections",
                                 max_detections=max_detections,
@@ -93,7 +99,7 @@ def _build_keras_models(mode):
                                 detection_min_confidence=detection_min_confidence,
                                 detection_nms_threshold=detection_nms_threshold)([rois, classification])
 
-    if mode == "coreml":
+    if environment == EnvironmentKeys.CORE_ML:
         #TODO: eventually remove this useless operation, but now required for CoreML
         detections = keras.layers.Reshape((max_detections, 6))(detections)
 
@@ -105,10 +111,22 @@ def _build_keras_models(mode):
                                   max_regions=max_detections,
                                   pyramid_top_down_size=pyramid_top_down_size)
 
-    fpn_mask_model, masks = fpn_mask_graph.build()
+    fpn_mask_model, masks = fpn_mask_graph.build(environment=environment)
 
-    mask_rcnn_model = keras.models.Model(input_image,
-                                         [detections, masks],
+    inputs = [input_image]
+    outputs = []
+
+    if environment == EnvironmentKeys.ESTIMATOR:
+        input_id = keras.layers.Input(shape=[1], name="input_id", dtype=tf.string)
+        input_original_shape = keras.layers.Input(shape=[3], name="input_original_shape", dtype=tf.int32)
+        input_window_shape = keras.layers.Input(shape=[3], name="input_window_shape", dtype=tf.int32)
+        inputs.extend([input_id, input_original_shape,input_window_shape])
+        outputs.extend([input_id, input_original_shape,input_window_shape])
+
+    outputs.extend([detections, masks])
+
+    mask_rcnn_model = keras.models.Model(inputs,
+                                         outputs,
                                          name='mask_rcnn_model')
 
     return mask_rcnn_model, fpn_classifier_model, fpn_mask_model, proposal_layer.anchors
@@ -154,13 +172,11 @@ class MaskRCNNModel():
     def predict(self,
                 dataset_id,
                 input_fn,
-                image_info_fn,
                 class_label_fn):
         estimator = self._get_estimator()
         tensor_values = estimator.predict(input_fn)
         return _results_from_tensor_values(tensor_values,
                                            dataset_id=dataset_id,
-                                           image_info_fn=image_info_fn,
                                            class_label_fn=class_label_fn)
 
     def get_trained_keras_models(self):
@@ -222,19 +238,38 @@ class MaskRCNNModel():
             return loss
 
         def mAP(y_true, y_pred):
-            #TODO: associate to a dynamic metric
-            print(y_true)
-            print(y_pred)
+            #TODO: perform mAP
             return keras.backend.constant(0)
 
         mask_rcnn_model.compile(
             optimizer=optimizer,
-            loss=[custom_loss, custom_loss],
+            loss=[custom_loss for _ in range(len(mask_rcnn_model.outputs))],
             metrics=[mAP])
-
-        return keras.estimator.model_to_estimator(mask_rcnn_model, model_dir=self.model_dir)
+        return model_to_estimator(mask_rcnn_model,
+                                  model_dir=self.model_dir)
 
     #TEMPORARY
 class _CustomOptimizer(keras.optimizers.Optimizer):
     def get_updates(self, loss, params):
         return []
+
+if tf.__version__ != '1.5.0':
+    from tensorflow.python.estimator import estimator as estimator_lib
+    from tensorflow.python.estimator import keras as estimator_keras_lib
+
+
+    def model_to_estimator(keras_model=None,
+                           model_dir=None,
+                           config=None):
+        config = estimator_lib.maybe_overwrite_model_dir_and_session_config(config, model_dir)
+        keras_model_fn = estimator_keras_lib._create_keras_model_fn(keras_model, None)
+        warm_start_path = None
+        if keras_model._is_graph_network:
+            warm_start_path = estimator_keras_lib._save_first_checkpoint(keras_model, None, config)
+        weight_names = [weight.name[:-2] for layer in keras_model.layers for weight in layer.weights]
+        ws = estimator_lib.WarmStartSettings(ckpt_to_initialize_from=warm_start_path,
+                                             vars_to_warm_start=weight_names)
+        estimator = estimator_lib.Estimator(keras_model_fn,
+                                            config=config,
+                                            warm_start_from=ws)
+        return estimator

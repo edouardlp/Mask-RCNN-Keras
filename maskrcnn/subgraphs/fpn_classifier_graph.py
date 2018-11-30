@@ -9,6 +9,7 @@ else:
 import numpy as np
 
 from .pyramid_roi_align_layer import PyramidROIAlign
+from .utils import batch_slice
 
 #We use a custom layer to implement the time distributed layer in Swift
 class TimeDistributedClassifier(Layer):
@@ -37,44 +38,9 @@ class TimeDistributedClassifier(Layer):
         config['fc_layers_size'] = self.fc_layers_size
         return config
 
-
     def call(self, inputs):
-
-        input = inputs[0]
-        pool_size = self.pool_size
-        fc_layers_size = self.fc_layers_size
-        num_classes = self.num_classes
-
-        if(len(input.shape) == 4):
-            input = tf.expand_dims(input, axis=0)
-
-        x = keras.layers.TimeDistributed(keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
-                                         name="mrcnn_class_conv1")(input)
-        x = keras.layers.TimeDistributed(keras.layers.BatchNormalization(), name='mrcnn_class_bn1')(x, training=False)
-        x = keras.layers.Activation('relu')(x)
-
-        x = keras.layers.TimeDistributed(keras.layers.Conv2D(fc_layers_size, (1, 1)), name="mrcnn_class_conv2")(x)
-        x = keras.layers.TimeDistributed(keras.layers.BatchNormalization(), name='mrcnn_class_bn2')(x,
-                                                                                                    training=False)
-        shared = keras.layers.Activation('relu')(x)
-        shared = keras.layers.Lambda(lambda x: keras.backend.squeeze(keras.backend.squeeze(x, 3), 2),
-                                     name="pool_squeeze")(shared)
-        logits = keras.layers.TimeDistributed(keras.layers.Dense(num_classes), name='mrcnn_class_logits')(shared)
-        probabilities = keras.layers.TimeDistributed(keras.layers.Activation("softmax"), name="mrcnn_class")(logits)
-        bounding_boxes = keras.layers.TimeDistributed(keras.layers.Dense(num_classes * 4, activation='linear'),
-                                                      name='mrcnn_bbox_fc')(shared)
-
-        probabilities = tf.reshape(probabilities, shape=(self.max_regions, self.num_classes))
-        bounding_boxes = tf.reshape(bounding_boxes, shape=(self.max_regions, self.num_classes,4))
-        class_ids = tf.argmax(probabilities, axis=1, output_type=tf.int32)
-        indices = tf.stack([tf.range(probabilities.shape[0]), class_ids], axis=1)
-        class_scores = tf.gather_nd(probabilities, indices)
-        deltas_specific = tf.gather_nd(bounding_boxes, indices)
-        class_ids = tf.to_float(class_ids)
-
-        result = tf.concat([deltas_specific,tf.expand_dims(class_ids,axis=1),tf.expand_dims(class_scores,axis=1)], axis=1)
-        result = tf.expand_dims(result,axis=0)
-        return result
+        #Dummy output for CoreML
+        return tf.convert_to_tensor(np.zeros((1,self.max_regions,6), dtype=np.float32))
 
     def compute_output_shape(self, input_shape):
         #(dy,dx,log(dh),log(dw),classId,score)
@@ -128,7 +94,7 @@ class FPNClassifierGraph():
 
         return keras.models.Model(inputs=[input], outputs=[probabilities,bounding_boxes])
 
-    def build(self):
+    def build(self, environment):
 
         rois = self.rois
         feature_maps = self.feature_maps
@@ -144,16 +110,52 @@ class FPNClassifierGraph():
                                   pool_shape=[pool_size, pool_size],
                                   image_shape=image_shape)([rois] + feature_maps)
 
-        fpn_classifier_model = self._build_coreml_inner_model()
+        if environment == "coreml":
+            fpn_classifier_model = self._build_coreml_inner_model()
 
-        x = keras.layers.TimeDistributed(keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
-                                         name="mrcnn_class_conv1")(pyramid)
+            classification = TimeDistributedClassifier(max_regions=max_regions,
+                                                       pool_size=pool_size,
+                                                       num_classes=num_classes,
+                                                       pyramid_top_down_size=pyramid_top_down_size,
+                                                       fc_layers_size=fc_layers_size)([pyramid])
+            return fpn_classifier_model, classification
+        else:
+            x = keras.layers.TimeDistributed(
+                keras.layers.Conv2D(fc_layers_size, (pool_size, pool_size), padding="valid"),
+                name="mrcnn_class_conv1")(pyramid)
+            x = keras.layers.TimeDistributed(keras.layers.BatchNormalization(), name='mrcnn_class_bn1')(x,
+                                                                                                        training=False)
+            x = keras.layers.Activation('relu')(x)
+
+            x = keras.layers.TimeDistributed(keras.layers.Conv2D(fc_layers_size, (1, 1)), name="mrcnn_class_conv2")(x)
+            x = keras.layers.TimeDistributed(keras.layers.BatchNormalization(), name='mrcnn_class_bn2')(x,
+                                                                                                        training=False)
+            shared = keras.layers.Activation('relu')(x)
+            shared = keras.layers.Lambda(lambda x: keras.backend.squeeze(keras.backend.squeeze(x, 3), 2),
+                                         name="pool_squeeze")(shared)
+            logits = keras.layers.TimeDistributed(keras.layers.Dense(num_classes), name='mrcnn_class_logits')(shared)
+            probabilities = keras.layers.TimeDistributed(keras.layers.Activation("softmax"), name="mrcnn_class")(logits)
+            bounding_boxes = keras.layers.TimeDistributed(keras.layers.Dense(num_classes * 4, activation='linear'),
+                                                          name='mrcnn_bbox_fc')(shared)
+
+            def prepare_results(probabilities,bounding_boxes):
+                bounding_boxes = tf.reshape(bounding_boxes, shape=(self.max_regions, self.num_classes, 4))
+                class_ids = tf.argmax(probabilities, axis=1, output_type=tf.int32)
+                indices = tf.stack([tf.range(probabilities.shape[0]), class_ids], axis=1)
+                class_scores = tf.gather_nd(probabilities, indices)
+                deltas_specific = tf.gather_nd(bounding_boxes, indices)
+                class_ids = tf.to_float(class_ids)
+                result = tf.concat(
+                    [deltas_specific, tf.expand_dims(class_ids, axis=1), tf.expand_dims(class_scores, axis=1)], axis=1)
+                return result
+
+            def prep(inputs):
+                prob = inputs[0]
+                bound = inputs[1]
+                return batch_slice([prob, bound], lambda x, y: prepare_results(x, y), 1)
+
+            result = keras.layers.Lambda(lambda x: prep(x), name='classification')([probabilities,bounding_boxes])
+            return None, result
 
 
-        classification = TimeDistributedClassifier(max_regions=max_regions,
-                                                   pool_size=pool_size,
-                                                   num_classes=num_classes,
-                                                   pyramid_top_down_size=pyramid_top_down_size,
-                                                   fc_layers_size=fc_layers_size)([pyramid])
 
-        return fpn_classifier_model,classification

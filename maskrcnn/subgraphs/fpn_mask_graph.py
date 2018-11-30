@@ -145,7 +145,7 @@ class FPNMaskGraph():
 
         return keras.models.Model(inputs=[input], outputs=[x])
 
-    def build(self):
+    def build(self, environment):
 
         rois = self.rois
         feature_maps = self.feature_maps

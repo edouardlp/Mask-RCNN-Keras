@@ -11,7 +11,7 @@ class BackboneGraph():
         self.architecture = architecture
         self.pyramid_size = pyramid_size
 
-    def build(self):
+    def build(self, environment):
 
         #TODO: support mobile graph here
 
