@@ -90,14 +90,14 @@ def _build_keras_models(environment):
                                               pyramid_top_down_size=pyramid_top_down_size)
 
     # rois_class_probs: Probability of each class being contained within the roi
-    # rois_deltas: Bounding box refinements to apply to each roi to better enclose its object
-    fpn_classifier_model, classification = fpn_classifier_graph.build(environment=environment)
+    # classifications: Bounding box refinements to apply to each roi to better enclose its object
+    fpn_classifier_model, classifications = fpn_classifier_graph.build(environment=environment)
 
     detections = DetectionLayer(name="detections",
                                 max_detections=max_detections,
                                 bounding_box_std_dev=bounding_box_std_dev,
                                 detection_min_confidence=detection_min_confidence,
-                                detection_nms_threshold=detection_nms_threshold)([rois, classification])
+                                detection_nms_threshold=detection_nms_threshold)([rois, classifications])
 
     if environment == EnvironmentKeys.CORE_ML:
         #TODO: eventually remove this useless operation, but now required for CoreML
@@ -123,7 +123,7 @@ def _build_keras_models(environment):
         inputs.extend([input_id, input_original_shape,input_window_shape])
         outputs.extend([input_id, input_original_shape,input_window_shape])
 
-    outputs.extend([detections, masks])
+    outputs.extend([detections,masks])
 
     mask_rcnn_model = keras.models.Model(inputs,
                                          outputs,

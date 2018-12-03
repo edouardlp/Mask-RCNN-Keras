@@ -47,14 +47,14 @@ def _results_from_tensor_values(values,
                                        value["input_original_shape"],
                                        value["input_window_shape"])
         raw_detections = value["detections"]
-        masks = value["masks"]
-        masks = np.transpose(masks, axes=[2, 1, 0])
+        #masks = value["masks"]
+        #masks = np.transpose(masks, axes=[2, 1, 0])
 
         detections = []
 
         for i in range(0, raw_detections.shape[0]):
             raw_detection = raw_detections[i]
-            mask = masks[i]
+            #mask = masks[i]
             class_id = int(raw_detection[4])
             if (class_id == 0):
                 continue
@@ -64,7 +64,7 @@ def _results_from_tensor_values(values,
                                                 class_id=class_id,
                                                 class_label=class_label_fn(class_id),
                                                 bounding_box=bounding_box,
-                                                mask=mask)
+                                                mask=[])
             detections.append(detection)
 
         result = MaskRCNNResult(dataset_id=dataset_id,

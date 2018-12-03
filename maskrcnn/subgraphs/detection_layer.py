@@ -7,7 +7,6 @@ else:
     from tensorflow.keras.layers import Layer
 import numpy as np
 
-from .utils import batch_slice
 from .utils import apply_box_deltas_graph
 from .utils import clip_boxes_graph
 from .utils import norm_boxes_graph
@@ -38,10 +37,10 @@ def refine_detections_graph(rois,
     """
     # Class IDs per ROI
     class_ids = tf.to_int32(classifications[:,4])
+    # Class-specific bounding box deltas
     deltas_specific = classifications[:,0:4]
     # Class probability of the top class of each ROI
-    class_scores = classifications[:,5] #index 5
-    # Class-specific bounding box deltas
+    class_scores = classifications[:,5]
     # Apply bounding box deltas
     # Shape: [boxes, (y1, x1, y2, x2)] in normalized coordinates
     refined_rois = apply_box_deltas_graph(
@@ -134,8 +133,6 @@ class DetectionLayer(Layer):
                  detection_nms_threshold,
                  **kwargs):
         super(DetectionLayer, self).__init__(**kwargs)
-        self.images_per_gpu = 1
-        self.batch_size = 1
         self.max_detections = max_detections
         self.bounding_box_std_dev = bounding_box_std_dev
         self.detection_min_confidence = detection_min_confidence
@@ -153,6 +150,7 @@ class DetectionLayer(Layer):
     def call(self, inputs):
         rois = inputs[0]
         classifications = inputs[1]
+
         # Get windows of images in normalized coordinates. Windows are the area
         # in the image that excludes the padding.
         # Use the shape of the first image in the batch to normalize the window
@@ -162,24 +160,18 @@ class DetectionLayer(Layer):
         image_shape = tf.convert_to_tensor([256,256,3], dtype=tf.float32)
         window = tf.convert_to_tensor([0,0,256,256], dtype=tf.float32)
 
-        window = tf.reshape(window, [-1,4])
-        window = norm_boxes_graph(window, image_shape[:2])
-        window = tf.reshape(window, [-1,4])
+        #window = norm_boxes_graph(window, image_shape[:2])
 
-        #window = tf.reshape(window, (None,4))
-        # Run detection refinement graph on each item in the batch
-        detections_batch = batch_slice(
-            [rois, classifications, window],
-            lambda x, y, z: refine_detections_graph(x, y, z, np.array(self.bounding_box_std_dev), self.detection_min_confidence, self.max_detections, self.detection_nms_threshold),
-            self.images_per_gpu)
+        def refine_detections(value):
+            x = value[0]
+            y = value[1]
+            z = window
+            return refine_detections_graph(x, y, z, np.array(self.bounding_box_std_dev), self.detection_min_confidence, self.max_detections, self.detection_nms_threshold)
 
-        # Reshape output
-        # [batch, num_detections, (y1, x1, y2, x2, class_id, class_score)] in
-        # normalized coordinates
-        detections = keras.layers.Lambda(lambda x: tf.reshape(
-            x,
-            [self.batch_size, self.max_detections, 6]))(detections_batch)
+        detections = keras.layers.Lambda(lambda x: tf.map_fn(refine_detections, x, dtype=tf.float32))([rois,classifications])
         return detections
 
     def compute_output_shape(self, input_shape):
-        return (None, 1, self.max_detections, 6)
+        assert isinstance(input_shape, list)
+        roi_shape, classifications_shape = input_shape
+        return (roi_shape[0],self.max_detections, 6)

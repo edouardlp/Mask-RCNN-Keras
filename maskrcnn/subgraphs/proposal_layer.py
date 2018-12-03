@@ -9,7 +9,6 @@ else:
 import numpy as np
 import math
 
-from .utils import batch_slice
 from .utils import apply_box_deltas_graph
 from .utils import clip_boxes_graph
 from .utils import norm_boxes_graph
@@ -57,8 +56,6 @@ class ProposalLayer(Layer):
         self.anchor_stride = anchor_stride
         assert max_proposals != None
 
-        self.images_per_gpu = 1
-
         backbone_shapes = np.array(
         [[int(math.ceil(image_shape[0] / stride)),
             int(math.ceil(image_shape[1] / stride))]
@@ -89,44 +86,47 @@ class ProposalLayer(Layer):
         # Box deltas [batch, num_rois, 4]
         deltas = inputs[1]
         deltas = deltas * np.reshape(self.bounding_box_std_dev, [1, 1, 4])
-
         # Anchors
-        anchors = np.broadcast_to(self.anchors, (1,) + self.anchors.shape)
-
+        anchors = self.anchors
         # Improve performance by trimming to top anchors by score
         # and doing the rest on the smaller subset.
-        pre_nms_limit = tf.minimum(self.pre_nms_max_proposals, tf.shape(anchors)[1])
-        ix = tf.nn.top_k(scores, pre_nms_limit, sorted=True,
-                         name="top_anchors").indices
-        scores = batch_slice([scores, ix], lambda x, y: tf.gather(x, y),
-                                   self.images_per_gpu)
-        deltas = batch_slice([deltas, ix], lambda x, y: tf.gather(x, y),
-                                   self.images_per_gpu)
-        pre_nms_anchors = batch_slice([anchors, ix], lambda a, x: tf.gather(a, x),
-                                    self.images_per_gpu,
-                                    names=["pre_nms_anchors"])
+        pre_nms_limit = tf.minimum(self.pre_nms_max_proposals, tf.shape(anchors)[0])
+
+        scores, ix = tf.nn.top_k(scores, pre_nms_limit, sorted=True, name="top_anchors")
+
+        def gather(inputs):
+            return tf.gather(inputs[0], inputs[1])
+
+        deltas = tf.map_fn(gather,[deltas, ix], dtype=deltas.dtype)
+
+        def gather_anchors(index):
+            return tf.gather(anchors,index)
+
+        pre_nms_anchors = tf.map_fn(gather_anchors,ix, dtype=anchors.dtype)
+
+        def apply_box_deltas(inputs):
+            return apply_box_deltas_graph(inputs[0], inputs[1])
 
         # Apply deltas to anchors to get refined anchors.
         # [batch, N, (y1, x1, y2, x2)]
-        boxes = batch_slice([pre_nms_anchors, deltas],
-                                  lambda x, y: apply_box_deltas_graph(x, y),
-                                  self.images_per_gpu,
-                                  names=["refined_anchors"])
+        boxes = tf.map_fn(apply_box_deltas,[pre_nms_anchors, deltas], dtype=deltas.dtype)
 
         # Clip to image boundaries. Since we're in normalized coordinates,
         # clip to 0..1 range. [batch, N, (y1, x1, y2, x2)]
         window = np.array([0, 0, 1, 1], dtype=np.float32)
-        boxes = batch_slice(boxes,
-                                  lambda x: clip_boxes_graph(x, window),
-                                  self.images_per_gpu,
-                                  names=["refined_anchors_clipped"])
+
+        def clip_boxes(boxes):
+            return clip_boxes_graph(boxes, window)
+        boxes = tf.map_fn(clip_boxes,boxes, dtype=boxes.dtype)
 
         # Filter out small boxes
         # According to Xinlei Chen's paper, this reduces detection accuracy
         # for small objects, so we're skipping it.
 
         # Non-max suppression
-        def nms(boxes, scores):
+        def nms(inputs):
+            boxes = inputs[0]
+            scores = inputs[1]
             indices = tf.image.non_max_suppression(
                 boxes, scores, self.max_proposals,
                 self.nms_threshold, name="rpn_non_max_suppression")
@@ -136,11 +136,8 @@ class ProposalLayer(Layer):
             proposals = tf.pad(proposals, [(0, padding), (0, 0)])
             return proposals
 
-        proposals = batch_slice([boxes, scores], nms,
-                                      self.images_per_gpu)
-
+        proposals = tf.map_fn(nms,[boxes, scores], dtype=boxes.dtype)
         proposals = keras.layers.Reshape((self.max_proposals,4), name="proposals")(proposals)
-
         return proposals
 
     def compute_output_shape(self, input_shape):

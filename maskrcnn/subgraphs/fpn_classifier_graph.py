@@ -9,7 +9,6 @@ else:
 import numpy as np
 
 from .pyramid_roi_align_layer import PyramidROIAlign
-from .utils import batch_slice
 
 #We use a custom layer to implement the time distributed layer in Swift
 class TimeDistributedClassifier(Layer):
@@ -138,7 +137,11 @@ class FPNClassifierGraph():
             bounding_boxes = keras.layers.TimeDistributed(keras.layers.Dense(num_classes * 4, activation='linear'),
                                                           name='mrcnn_bbox_fc')(shared)
 
-            def prepare_results(probabilities,bounding_boxes):
+            def prepare_results(inputs):
+
+                probabilities = inputs[0]
+                bounding_boxes = inputs[1]
+
                 bounding_boxes = tf.reshape(bounding_boxes, shape=(self.max_regions, self.num_classes, 4))
                 class_ids = tf.argmax(probabilities, axis=1, output_type=tf.int32)
                 indices = tf.stack([tf.range(probabilities.shape[0]), class_ids], axis=1)
@@ -149,12 +152,7 @@ class FPNClassifierGraph():
                     [deltas_specific, tf.expand_dims(class_ids, axis=1), tf.expand_dims(class_scores, axis=1)], axis=1)
                 return result
 
-            def prep(inputs):
-                prob = inputs[0]
-                bound = inputs[1]
-                return batch_slice([prob, bound], lambda x, y: prepare_results(x, y), 1)
-
-            result = keras.layers.Lambda(lambda x: prep(x), name='classification')([probabilities,bounding_boxes])
+            result = keras.layers.Lambda(lambda x: tf.map_fn(prepare_results, x, dtype=tf.float32), name='classifications')([probabilities,bounding_boxes])
             return None, result
 
 
