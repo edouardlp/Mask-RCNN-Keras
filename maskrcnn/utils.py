@@ -55,27 +55,29 @@ def normalized_image_shape_and_padding(original_shape,
            np.array(padding,
                     dtype=np.int32)
 
+#This accepts and outputs normalized coordinates
+def crop_box_to_outer_box(box, cropping_box):
+
+    crop_y1 = cropping_box[0]
+    crop_x1 = cropping_box[1]
+    crop_y2 = cropping_box[2]
+    crop_x2 = cropping_box[3]
+
+    crop_width = crop_x2-crop_x1
+    crop_height = crop_y2-crop_y1
+
+    y1 = max(box[0]-crop_y1,0)
+    x1 = max(box[1]-crop_x1,0)
+    y2 = min(box[2]-crop_y1,crop_height)
+    x2 = min(box[3]-crop_x1,crop_width)
+    #We renormalize the box to the shape of the crop
+    return [y1/crop_height, x1/crop_width, y2/crop_height, x2/crop_width]
+
 def denormalize_box(box,
-                    original_shape,
-                    model_input_shape,
-                    mode=NormalizationModeKeys.ASPECT_FIT_PAD):
+                    shape):
 
-    width_ratio = model_input_shape[0] / original_shape[0]
-    height_ratio = model_input_shape[1] / original_shape[1]
-
-    fit_to_width = width_ratio < height_ratio
-
-    short_side = original_shape[1] if fit_to_width else original_shape[0]
-    short_side_input_in_original = model_input_shape[1] / width_ratio if fit_to_width else model_input_shape[0] / height_ratio
-    margins = short_side_input_in_original - short_side
-
-    denorm_width_factor = original_shape[0] if fit_to_width else short_side_input_in_original
-    denorm_height_factor = short_side_input_in_original if fit_to_width else original_shape[1]
-
-    if(mode == NormalizationModeKeys.FILL):
-        margins = 0
-        denorm_width_factor = original_shape[0]
-        denorm_height_factor = original_shape[1]
+    denorm_width_factor = shape[0]
+    denorm_height_factor = shape[1]
 
     y1 = box[0]
     x1 = box[1]
@@ -85,9 +87,7 @@ def denormalize_box(box,
     height = y2 - y1
 
     x1 = x1 * denorm_width_factor
-    x1 = x1 if fit_to_width else x1 - margins / 2
     y1 = y1 * denorm_height_factor
-    y1 = y1 - margins / 2 if fit_to_width else y1
     width = width * denorm_width_factor
     height = height * denorm_height_factor
     return [x1, y1, width, height]

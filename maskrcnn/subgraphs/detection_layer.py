@@ -87,8 +87,7 @@ def refine_detections_graph(rois,
         return class_keep
 
     # 2. Map over class IDs
-    nms_keep = tf.map_fn(nms_keep_map, unique_pre_nms_class_ids,
-                         dtype=tf.int64)
+    nms_keep = tf.map_fn(nms_keep_map, unique_pre_nms_class_ids,dtype=tf.int64)
     # 3. Merge results into one list, and remove -1 padding
     nms_keep = tf.reshape(nms_keep, [-1])
     nms_keep = tf.gather(nms_keep, tf.where(nms_keep > -1)[:, 0])
@@ -131,12 +130,14 @@ class DetectionLayer(Layer):
                  bounding_box_std_dev,
                  detection_min_confidence,
                  detection_nms_threshold,
+                 image_shape,
                  **kwargs):
         super(DetectionLayer, self).__init__(**kwargs)
         self.max_detections = max_detections
         self.bounding_box_std_dev = bounding_box_std_dev
         self.detection_min_confidence = detection_min_confidence
         self.detection_nms_threshold = detection_nms_threshold
+        self.image_shape = image_shape
         assert max_detections != None
 
     def get_config(self):
@@ -145,30 +146,29 @@ class DetectionLayer(Layer):
         config['bounding_box_std_dev'] = self.bounding_box_std_dev
         config['detection_min_confidence'] = self.detection_min_confidence
         config['detection_nms_threshold'] = self.detection_nms_threshold
+        config['image_shape'] = self.image_shape
         return config
 
     def call(self, inputs):
-        rois = inputs[0]
-        classifications = inputs[1]
+        def refine_detections(inputs):
+            rois = inputs[0]
+            classifications = inputs[1]
 
-        # Get windows of images in normalized coordinates. Windows are the area
-        # in the image that excludes the padding.
-        # Use the shape of the first image in the batch to normalize the window
-        # because we know that all images get resized to the same size.
+            if len(inputs) > 2:
+                image_bounding_box = inputs[2]
+            else:
+                image_bounding_box = tf.convert_to_tensor(np.array([0, 0, 1, 1]),
+                                                          dtype=tf.float32)
 
-        #TODO: get these sizes from config
-        image_shape = tf.convert_to_tensor([256,256,3], dtype=tf.float32)
-        window = tf.convert_to_tensor([0,0,256,256], dtype=tf.float32)
+            return refine_detections_graph(rois,
+                                           classifications,
+                                           image_bounding_box,
+                                           np.array(self.bounding_box_std_dev),
+                                           self.detection_min_confidence,
+                                           self.max_detections,
+                                           self.detection_nms_threshold)
 
-        #window = norm_boxes_graph(window, image_shape[:2])
-
-        def refine_detections(value):
-            x = value[0]
-            y = value[1]
-            z = window
-            return refine_detections_graph(x, y, z, np.array(self.bounding_box_std_dev), self.detection_min_confidence, self.max_detections, self.detection_nms_threshold)
-
-        detections = keras.layers.Lambda(lambda x: tf.map_fn(refine_detections, x, dtype=tf.float32))([rois,classifications])
+        detections = keras.layers.Lambda(lambda x: tf.map_fn(refine_detections, x, dtype=tf.float32))(inputs)
         return detections
 
     def compute_output_shape(self, input_shape):

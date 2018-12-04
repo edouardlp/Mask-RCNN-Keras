@@ -15,26 +15,14 @@ class TimeDistributedClassifier(Layer):
 
     def __init__(self,
                  max_regions = None,
-                 pool_size = None,
-                 num_classes=None,
-                 pyramid_top_down_size=None,
-                 fc_layers_size=None,
                  **kwargs):
         super(TimeDistributedClassifier, self).__init__(**kwargs)
         self.max_regions = max_regions
-        self.pool_size = pool_size
-        self.num_classes = num_classes
-        self.pyramid_top_down_size = pyramid_top_down_size
-        self.fc_layers_size = fc_layers_size
         assert max_regions != None
 
     def get_config(self):
         config = super(TimeDistributedClassifier, self).get_config()
         config['max_regions'] = self.max_regions
-        config['pool_size'] = self.pool_size
-        config['num_classes'] = self.num_classes
-        config['pyramid_top_down_size'] = self.pyramid_top_down_size
-        config['fc_layers_size'] = self.fc_layers_size
         return config
 
     def call(self, inputs):

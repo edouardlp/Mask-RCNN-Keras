@@ -12,6 +12,7 @@ from keras.preprocessing.image import img_to_array
 from ..utils import NormalizationModeKeys
 from ..utils import normalized_image_shape_and_padding
 from ..utils import denormalize_box
+from ..utils import crop_box_to_outer_box
 
 class COCODataset():
 
@@ -21,8 +22,8 @@ class COCODataset():
     _IMAGE_KEY = "image"
     _ORIGINAL_SHAPE_KEY = "original_shape"
     _ACTUAL_SHAPE_KEY = "actual_shape"
-    _WINDOW_SHAPE_KEY = "window_shape"
     _IMAGE_PADDING_KEY = "image_padding"
+    _IMAGE_BOUNDING_BOX_KEY = "image_bounding_box"
 
     _CLASS_NAMES = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
                'bus', 'train', 'truck', 'boat', 'traffic light',
@@ -97,11 +98,13 @@ class COCODataset():
 
         for result in results:
             id = int(result.image_info.id)
-            original_shape = result.image_info.original_shape
-            window_shape = result.image_info.window_shape
+            image_bounding_box = result.image_info.bounding_box
+            image_original_shape = result.image_info.original_shape
             image_ids.append(id)
             for detection in result.detections:
-                bounding_box = denormalize_box(detection.bounding_box,original_shape, window_shape, mode=self.mode)
+                cropped_box = crop_box_to_outer_box(detection.bounding_box, image_bounding_box)
+                bounding_box = denormalize_box(cropped_box,
+                                               image_original_shape)
                 coco_result = {"image_id": id,
                                "category_id" : mapping[detection.class_id],
                                "score" : detection.probability,
@@ -144,6 +147,8 @@ class COCODataset():
         coco = self._get_coco()
 
         imgIds = coco.getImgIds()
+        imgIds = sorted(imgIds)
+
         if limit:
             imgIds = imgIds[:limit]
 
@@ -183,7 +188,6 @@ class COCODataset():
         original_shape = np.array([image["width"],image["height"],3], dtype=np.int64)
         normalized_shape, normalized_padding = normalized_image_shape_and_padding(original_shape, self.image_shape, mode=self.mode)
         resize_shape = normalized_shape[0:2]
-
         resized_image = original.resize(resize_shape, resample=PIL.Image.NEAREST)
         resized_image_array = img_to_array(resized_image)
 
@@ -226,12 +230,34 @@ class COCODataset():
 
             image = tf.reshape(image, actual_shape)
             padded_image = tf.pad(image, padding, "CONSTANT")
+
+            #TODO: permute self.image_shape so it is HWC
             padded_image = tf.reshape(padded_image, self.image_shape)
 
+            image_shape = tf.convert_to_tensor(self.image_shape, dtype=tf.float32)
+
+            padding_float = tf.to_float(padding)
+            image_shape_float = tf.to_float(image_shape)
+            actual_shape_float = tf.to_float(actual_shape)
+
+            #actual_shape is store HWC
+            actual_height = actual_shape_float[0]
+            actual_width = actual_shape_float[1]
+
+            y1 = padding_float[0][0]
+            x1 = padding_float[1][0]
+            y2 = y1+actual_height
+            x2 = x1+actual_width
+
+            bounding_box = tf.convert_to_tensor([y1/image_shape_float[1],
+                                                 x1/image_shape_float[0],
+                                                 y2/image_shape_float[1],
+                                                 x2/image_shape_float[0]], dtype=tf.float32)
+
             prefix = "input_"
-            return {prefix+self._IMAGE_KEY : padded_image,
-                    prefix+self._ID_KEY : id,
-                    prefix+self._ORIGINAL_SHAPE_KEY : original_shape,
-                    prefix+self._WINDOW_SHAPE_KEY: tf.constant(self.image_shape)}
+            return {prefix+self._ID_KEY : id,
+                    prefix+self._IMAGE_KEY : padded_image,
+                    prefix+self._IMAGE_BOUNDING_BOX_KEY : bounding_box,
+                    prefix+self._ORIGINAL_SHAPE_KEY: original_shape}
 
         return parser

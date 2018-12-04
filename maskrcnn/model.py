@@ -19,16 +19,11 @@ class EnvironmentKeys(object):
   ESTIMATOR = 'tf.estimator'
   CORE_ML = 'coreml'
 
-
-def _build_keras_models(environment):
-
-    assert environment in [EnvironmentKeys.ESTIMATOR,
-                           EnvironmentKeys.CORE_ML]
-
+class Config(object):
     architecture = 'resnet101'
     input_width = 1024
     input_height = 1024
-    input_image_shape = (input_width, input_height)
+    input_image_shape = (input_width, input_height, 3)
     num_classes = 1 + 80
     pre_nms_max_proposals = 6000
     max_proposals = 1000
@@ -47,17 +42,28 @@ def _build_keras_models(environment):
     backbone_strides = [4, 8, 16, 32, 64]
     anchor_stride = 1
 
-    input_image = keras.layers.Input(shape=[input_width, input_height, 3], name="input_image")
+def _build_keras_models(config,environment):
+
+    assert environment in [EnvironmentKeys.ESTIMATOR,
+                           EnvironmentKeys.CORE_ML]
+
+    input_image = keras.layers.Input(shape=config.input_image_shape, name="input_image")
+
+    if environment == EnvironmentKeys.ESTIMATOR:
+        input_id = keras.layers.Input(shape=[1], name="input_id", dtype=tf.string)
+        input_bounding_box = keras.layers.Input(shape=[4], name="input_image_bounding_box", dtype=tf.float32)
+        input_original_shape = keras.layers.Input(shape=[3], name="input_original_shape", dtype=tf.int32)
+
 
     backbone = BackboneGraph(input_tensor=input_image,
-                             architecture=architecture,
-                             pyramid_size=pyramid_top_down_size)
+                             architecture=config.architecture,
+                             pyramid_size=config.pyramid_top_down_size)
 
     P2, P3, P4, P5, P6 = backbone.build(environment=environment)
 
-    rpn = RPNGraph(anchor_stride=anchor_stride,
-                   anchors_per_location=anchors_per_location,
-                   depth=pyramid_top_down_size,
+    rpn = RPNGraph(anchor_stride=config.anchor_stride,
+                   anchors_per_location=config.anchors_per_location,
+                   depth=config.pyramid_top_down_size,
                    feature_maps=[P2, P3, P4, P5, P6])
 
     # anchor_object_probs: Probability of each anchor containing only background or objects
@@ -66,15 +72,15 @@ def _build_keras_models(environment):
 
     # rois: Regions of interest (regions of the image that probably contain an object)
     proposal_layer = ProposalLayer(name="ROI",
-                                   image_shape=input_image_shape,
-                                   max_proposals=max_proposals,
-                                   pre_nms_max_proposals=pre_nms_max_proposals,
-                                   bounding_box_std_dev=bounding_box_std_dev,
-                                   nms_threshold=proposal_nms_threshold,
-                                   anchor_scales=anchor_scales,
-                                   anchor_ratios=anchor_ratios,
-                                   backbone_strides=backbone_strides,
-                                   anchor_stride=anchor_stride)
+                                   image_shape=config.input_image_shape[0:2],
+                                   max_proposals=config.max_proposals,
+                                   pre_nms_max_proposals=config.pre_nms_max_proposals,
+                                   bounding_box_std_dev=config.bounding_box_std_dev,
+                                   nms_threshold=config.proposal_nms_threshold,
+                                   anchor_scales=config.anchor_scales,
+                                   anchor_ratios=config.anchor_ratios,
+                                   backbone_strides=config.backbone_strides,
+                                   anchor_stride=config.anchor_stride)
 
     rois = proposal_layer([anchor_object_probs, anchor_deltas])
 
@@ -82,34 +88,40 @@ def _build_keras_models(environment):
 
     fpn_classifier_graph = FPNClassifierGraph(rois=rois,
                                               feature_maps=mrcnn_feature_maps,
-                                              pool_size=classifier_pool_size,
-                                              image_shape=input_image_shape,
-                                              num_classes=num_classes,
-                                              max_regions=max_proposals,
-                                              fc_layers_size=fc_layers_size,
-                                              pyramid_top_down_size=pyramid_top_down_size)
+                                              pool_size=config.classifier_pool_size,
+                                              image_shape=config.input_image_shape,
+                                              num_classes=config.num_classes,
+                                              max_regions=config.max_proposals,
+                                              fc_layers_size=config.fc_layers_size,
+                                              pyramid_top_down_size=config.pyramid_top_down_size)
 
     # rois_class_probs: Probability of each class being contained within the roi
     # classifications: Bounding box refinements to apply to each roi to better enclose its object
     fpn_classifier_model, classifications = fpn_classifier_graph.build(environment=environment)
 
+    detection_inputs = [rois, classifications]
+
+    if environment == EnvironmentKeys.ESTIMATOR:
+        detection_inputs.append(input_bounding_box)
+
     detections = DetectionLayer(name="detections",
-                                max_detections=max_detections,
-                                bounding_box_std_dev=bounding_box_std_dev,
-                                detection_min_confidence=detection_min_confidence,
-                                detection_nms_threshold=detection_nms_threshold)([rois, classifications])
+                                max_detections=config.max_detections,
+                                bounding_box_std_dev=config.bounding_box_std_dev,
+                                detection_min_confidence=config.detection_min_confidence,
+                                detection_nms_threshold=config.detection_nms_threshold,
+                                image_shape=config.input_image_shape)(detection_inputs)
 
     if environment == EnvironmentKeys.CORE_ML:
         #TODO: eventually remove this useless operation, but now required for CoreML
-        detections = keras.layers.Reshape((max_detections, 6))(detections)
+        detections = keras.layers.Reshape((config.max_detections, 6))(detections)
 
     fpn_mask_graph = FPNMaskGraph(rois=detections,
                                   feature_maps=mrcnn_feature_maps,
-                                  pool_size=mask_pool_size,
-                                  image_shape=input_image_shape,
-                                  num_classes=num_classes,
-                                  max_regions=max_detections,
-                                  pyramid_top_down_size=pyramid_top_down_size)
+                                  pool_size=config.mask_pool_size,
+                                  image_shape=config.input_image_shape[0:2],
+                                  num_classes=config.num_classes,
+                                  max_regions=config.max_detections,
+                                  pyramid_top_down_size=config.pyramid_top_down_size)
 
     fpn_mask_model, masks = fpn_mask_graph.build(environment=environment)
 
@@ -117,11 +129,8 @@ def _build_keras_models(environment):
     outputs = []
 
     if environment == EnvironmentKeys.ESTIMATOR:
-        input_id = keras.layers.Input(shape=[1], name="input_id", dtype=tf.string)
-        input_original_shape = keras.layers.Input(shape=[3], name="input_original_shape", dtype=tf.int32)
-        input_window_shape = keras.layers.Input(shape=[3], name="input_window_shape", dtype=tf.int32)
-        inputs.extend([input_id, input_original_shape,input_window_shape])
-        outputs.extend([input_id, input_original_shape,input_window_shape])
+        inputs.extend([input_id, input_bounding_box,input_original_shape])
+        outputs.extend([input_id, input_bounding_box,input_original_shape])
 
     outputs.extend([detections,masks])
 
@@ -141,7 +150,7 @@ class MaskRCNNModel():
                  run_config=None,
                  initial_keras_weights=None):
 
-        self.config_path = config_path#TODO: actually read the config instead
+        self.config = Config()#TODO: load from config path
         self.model_dir = model_dir
         self.run_config = run_config
         self.initial_keras_weights = initial_keras_weights
@@ -215,8 +224,7 @@ class MaskRCNNModel():
         return None
 
     def _build_keras_models(self, environment):
-        #TODO: extract the config
-        return _build_keras_models(environment)
+        return _build_keras_models(self.config, environment)
 
     def _build_estimator(self):
         #TODO: we might want to skip this and load the model from the model_dir?
