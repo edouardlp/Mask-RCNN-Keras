@@ -1,18 +1,16 @@
 import os
 import tensorflow as tf
-import PIL
+import skimage
 import numpy as np
 
 from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 
-from keras.preprocessing.image import load_img
-from keras.preprocessing.image import img_to_array
-
 from ..utils import NormalizationModeKeys
 from ..utils import normalized_image_shape_and_padding
 from ..utils import denormalize_box
 from ..utils import crop_box_to_outer_box
+from ..utils import scale_box
 
 class COCODataset():
 
@@ -102,14 +100,28 @@ class COCODataset():
             image_original_shape = result.image_info.original_shape
             image_ids.append(id)
             for detection in result.detections:
-                cropped_box = crop_box_to_outer_box(detection.bounding_box, image_bounding_box)
-                bounding_box = denormalize_box(cropped_box,
-                                               image_original_shape)
+                denormed_bounding_box = denormalize_box(detection.bounding_box,
+                                                              self.image_shape)
+                denormed_image_bounding_box = denormalize_box(image_bounding_box,
+                                                              self.image_shape)
+                cropped_box = crop_box_to_outer_box(denormed_bounding_box, denormed_image_bounding_box)
+
+                horizontal_scale = image_original_shape[1]/self.image_shape[1]
+                vertical_scale = image_original_shape[0]/self.image_shape[0]
+
+                scale = max(horizontal_scale,vertical_scale)
+
+                scaled_box = scale_box(cropped_box, scale, scale)
+
                 coco_result = {"image_id": id,
                                "category_id" : mapping[detection.class_id],
                                "score" : detection.probability,
-                               "bbox" : bounding_box}
+                               "bbox" : list(np.around(scaled_box, 1))}
                 coco_results.append(coco_result)
+
+        import json
+        with open('results.json', 'w') as outfile:
+            json.dump(coco_results, outfile)
 
         coco_results = coco.loadRes(coco_results)
         cocoEval = COCOeval(coco, coco_results, "bbox")
@@ -182,16 +194,29 @@ class COCODataset():
         return dataset
 
     def _make_example(self, image):
+
         filename = image["file_name"]
-
-        original = load_img(self.images_dir + "/" + filename)
         original_shape = np.array([image["width"],image["height"],3], dtype=np.int64)
-        normalized_shape, normalized_padding = normalized_image_shape_and_padding(original_shape, self.image_shape, mode=self.mode)
-        resize_shape = normalized_shape[0:2]
-        resized_image = original.resize(resize_shape, resample=PIL.Image.NEAREST)
-        resized_image_array = img_to_array(resized_image)
+        resize_shape, normalized_padding = normalized_image_shape_and_padding(original_shape, self.image_shape, mode=self.mode)
 
-        actual_shape = np.array(resized_image_array.shape)
+        original = skimage.io.imread(self.images_dir + "/" +filename)
+        # If grayscale. Convert to RGB for consistency.
+        if original.ndim != 3:
+            original = skimage.color.gray2rgb(original)
+        # If has an alpha channel, remove it for consistency
+        if original.shape[-1] == 4:
+            original = original[..., :3]
+
+        resized_image = skimage.transform.resize(original, resize_shape,
+            order=1, mode='constant', cval=0, clip=True,
+            preserve_range=True, anti_aliasing=False,
+            anti_aliasing_sigma=None)
+
+        mean_substracted = resized_image.astype(np.float32)-np.array([123.7, 116.8, 103.9])
+
+        result = mean_substracted.astype(np.float32)
+
+        actual_shape = np.array(result.shape)
 
         def shape_to_feature(shape):
             return tf.train.Feature(int64_list=tf.train.Int64List(value=shape.astype(np.int64)))
@@ -206,7 +231,7 @@ class COCODataset():
                    self._ORIGINAL_SHAPE_KEY: shape_to_feature(original_shape),
                    self._ACTUAL_SHAPE_KEY: shape_to_feature(actual_shape),
                    self._IMAGE_PADDING_KEY : shape_to_feature(normalized_padding.flatten()),
-                   self._IMAGE_KEY: image_to_feature(resized_image_array)}
+                   self._IMAGE_KEY: image_to_feature(result)}
         example = tf.train.Example(features=tf.train.Features(feature=feature))
         return example.SerializeToString()
 
@@ -228,12 +253,16 @@ class COCODataset():
             padding = tf.cast(features[self._IMAGE_PADDING_KEY], tf.int32)
             padding = tf.reshape(padding, shape=(3,2))
 
-            image = tf.reshape(image, actual_shape)
-            padded_image = tf.pad(image, padding, "CONSTANT")
+            image = tf.reshape(image, actual_shape,name="image_initial_reshape")
+
+            padded_image = tf.pad(image, padding,
+                                  mode='CONSTANT',
+                                  constant_values=0,
+                                  name="image_pad")
 
             #TODO: permute self.image_shape so it is HWC
-            padded_image = tf.reshape(padded_image, self.image_shape)
-
+            padded_image = tf.reshape(padded_image, self.image_shape,
+                                  name="image_final_reshape")
             image_shape = tf.convert_to_tensor(self.image_shape, dtype=tf.float32)
 
             padding_float = tf.to_float(padding)

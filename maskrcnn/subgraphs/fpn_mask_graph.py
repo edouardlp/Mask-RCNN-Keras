@@ -100,8 +100,6 @@ class FPNMaskGraph():
         if environment == "coreml":
             result = TimeDistributedMask(max_regions=max_regions,
                                          pool_size=pool_size,
-                                         num_classes=num_classes,
-                                         pyramid_top_down_size=pyramid_top_down_size,
                                          name="masks")([pyramid, rois])
             fpn_mask_model = self._build_coreml_inner_model()
             return fpn_mask_model, result

@@ -48,15 +48,15 @@ def normalized_image_shape_and_padding(original_shape,
                right_padding],
                [0,0]]
 
-    return np.array([width,
-                     height,
+    return np.array([height,
+                     width,
                      model_input_shape[2]],
                     dtype=np.int32),\
            np.array(padding,
                     dtype=np.int32)
 
 #This accepts and outputs normalized coordinates
-def crop_box_to_outer_box(box, cropping_box):
+def crop_box_to_outer_box_normed(box, cropping_box):
 
     crop_y1 = cropping_box[0]
     crop_x1 = cropping_box[1]
@@ -73,21 +73,42 @@ def crop_box_to_outer_box(box, cropping_box):
     #We renormalize the box to the shape of the crop
     return [y1/crop_height, x1/crop_width, y2/crop_height, x2/crop_width]
 
+def crop_box_to_outer_box(box, cropping_box):
+
+    crop_x1 = cropping_box[0]
+    crop_y1 = cropping_box[1]
+    crop_width = cropping_box[2]
+    crop_height = cropping_box[3]
+
+    x1 = max(box[0]-crop_x1,0)
+    y1 = max(box[1]-crop_y1,0)
+    width = min(box[2], crop_width)
+    height = min(box[3], crop_height)
+
+    return [x1,
+            y1,
+            width,
+            height]
+
 def denormalize_box(box,
                     shape):
-
-    denorm_width_factor = shape[0]
-    denorm_height_factor = shape[1]
-
     y1 = box[0]
     x1 = box[1]
     y2 = box[2]
     x2 = box[3]
     width = x2 - x1
     height = y2 - y1
+    return scale_box([x1, y1, width, height], shape[0], shape[1])
 
-    x1 = x1 * denorm_width_factor
-    y1 = y1 * denorm_height_factor
-    width = width * denorm_width_factor
-    height = height * denorm_height_factor
+def scale_box(box, horizontal_scale, vertical_scale):
+
+    y1 = box[0]
+    x1 = box[1]
+    width = box[2]
+    height = box[3]
+
+    x1 = x1 * horizontal_scale
+    y1 = y1 * vertical_scale
+    width = width * horizontal_scale
+    height = height * vertical_scale
     return [x1, y1, width, height]

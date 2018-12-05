@@ -100,11 +100,7 @@ class FPNClassifierGraph():
         if environment == "coreml":
             fpn_classifier_model = self._build_coreml_inner_model()
 
-            classification = TimeDistributedClassifier(max_regions=max_regions,
-                                                       pool_size=pool_size,
-                                                       num_classes=num_classes,
-                                                       pyramid_top_down_size=pyramid_top_down_size,
-                                                       fc_layers_size=fc_layers_size)([pyramid])
+            classification = TimeDistributedClassifier(max_regions=max_regions)([pyramid])
             return fpn_classifier_model, classification
         else:
             x = keras.layers.TimeDistributed(

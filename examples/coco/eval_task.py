@@ -1,7 +1,7 @@
 from maskrcnn.model import MaskRCNNModel
 from maskrcnn.datasets.coco import COCODataset
 
-model = MaskRCNNModel("", initial_keras_weights="Data/weights.h5")
+model = MaskRCNNModel("", model_dir="Data/model/", initial_keras_weights="Data/weights.h5")
 
 coco_dataset = COCODataset(path="Data/coco/data.tfrecords",
                            type='val',

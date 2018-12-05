@@ -2,9 +2,12 @@ import tensorflow as tf
 if tf.__version__ == '1.5.0':
     import keras
     from keras.engine import Layer
+    from tensorflow import sparse_tensor_to_dense as to_dense
 else:
     from tensorflow import keras
     from tensorflow.keras.layers import Layer
+    from tensorflow.sparse import to_dense
+
 import numpy as np
 
 from .utils import apply_box_deltas_graph
@@ -49,7 +52,6 @@ def refine_detections_graph(rois,
     refined_rois = clip_boxes_graph(refined_rois, window)
 
     # TODO: Filter out boxes with zero area
-
     # Filter out background boxes
     keep = tf.where(class_ids > 0)[:, 0]
     # Filter out low confidence boxes
@@ -57,7 +59,7 @@ def refine_detections_graph(rois,
         conf_keep = tf.where(class_scores >= DETECTION_MIN_CONFIDENCE)[:, 0]
         keep = tf.sets.set_intersection(tf.expand_dims(keep, 0),
                                         tf.expand_dims(conf_keep, 0))
-        keep = tf.sparse_tensor_to_dense(keep)[0]
+        keep = to_dense(keep)[0]
 
     # Apply per-class NMS
     # 1. Prepare variables
@@ -87,14 +89,14 @@ def refine_detections_graph(rois,
         return class_keep
 
     # 2. Map over class IDs
-    nms_keep = tf.map_fn(nms_keep_map, unique_pre_nms_class_ids,dtype=tf.int64)
+    nms_keep = tf.map_fn(nms_keep_map, unique_pre_nms_class_ids,dtype=tf.int64, parallel_iterations=1)
     # 3. Merge results into one list, and remove -1 padding
     nms_keep = tf.reshape(nms_keep, [-1])
     nms_keep = tf.gather(nms_keep, tf.where(nms_keep > -1)[:, 0])
     # 4. Compute intersection between keep and nms_keep
     keep = tf.sets.set_intersection(tf.expand_dims(keep, 0),
                                     tf.expand_dims(nms_keep, 0))
-    keep = tf.sparse_tensor_to_dense(keep)[0]
+    keep = to_dense(keep)[0]
     # Keep top detections
     roi_count = DETECTION_MAX_INSTANCES
     class_scores_keep = tf.gather(class_scores, keep)

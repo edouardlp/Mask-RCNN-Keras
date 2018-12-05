@@ -1,0 +1,4 @@
+numpy
+tensorflow==1.12
+git+https://github.com/waleedka/coco.git#subdirectory=PythonAPI
+scikit-image
