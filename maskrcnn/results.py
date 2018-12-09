@@ -44,7 +44,6 @@ def _results_from_tensor_values(values,
     results = []
     for index,value in enumerate(values):
         id = value["input_id"].decode('utf-8')
-        print(index)
         image_info = MaskRCNNImageInfo(id,
                                        np.copy(value["input_image_bounding_box"]),
                                        np.copy(value["input_original_shape"]))

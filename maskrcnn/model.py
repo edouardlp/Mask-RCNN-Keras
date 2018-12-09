@@ -1,4 +1,4 @@
-import numpy as np
+import json
 
 import tensorflow as tf
 if tf.__version__ == '1.5.0':
@@ -20,27 +20,29 @@ class EnvironmentKeys(object):
   CORE_ML = 'coreml'
 
 class Config(object):
-    architecture = 'resnet101'
-    input_width = 1024
-    input_height = 1024
-    input_image_shape = (input_width, input_height, 3)
-    num_classes = 1 + 80
-    pre_nms_max_proposals = 6000
-    max_proposals = 1000
-    max_detections = 100
-    pyramid_top_down_size = 256
-    proposal_nms_threshold = 0.7
-    detection_min_confidence = 0.7
-    detection_nms_threshold = 0.3
-    bounding_box_std_dev = [0.1, 0.1, 0.2, 0.2]
-    classifier_pool_size = 7
-    mask_pool_size = 14
-    fc_layers_size = 1024
-    anchor_scales = (32, 64, 128, 256, 512)
-    anchor_ratios = [0.5, 1, 2]
-    anchors_per_location = len(anchor_ratios)
-    backbone_strides = [4, 8, 16, 32, 64]
-    anchor_stride = 1
+
+    def __init__(self):
+        self.architecture = 'resnet101'
+        self.input_width = 1024
+        self.input_height = 1024
+        self.input_image_shape = (self.input_width, self.input_height, 3)
+        self.num_classes = 1 + 80
+        self.pre_nms_max_proposals = 6000
+        self.max_proposals = 1000
+        self.max_detections = 100
+        self.pyramid_top_down_size = 256
+        self.proposal_nms_threshold = 0.7
+        self.detection_min_confidence = 0.7
+        self.detection_nms_threshold = 0.3
+        self.bounding_box_std_dev = [0.1, 0.1, 0.2, 0.2]
+        self.classifier_pool_size = 7
+        self.mask_pool_size = 14
+        self.fc_layers_size = 1024
+        self.anchor_scales = (32, 64, 128, 256, 512)
+        self.anchor_ratios = [0.5, 1, 2]
+        self.anchors_per_location = len(self.anchor_ratios)
+        self.backbone_strides = [4, 8, 16, 32, 64]
+        self.anchor_stride = 1
 
 def _build_keras_models(config,environment):
 
@@ -149,8 +151,10 @@ class MaskRCNNModel():
                  model_dir=None,
                  run_config=None,
                  initial_keras_weights=None):
-
-        self.config = Config()#TODO: load from config path
+        self.config = Config()
+        with open(config_path) as file:
+            config_dict = json.load(file)
+            self.config.__dict__.update(config_dict)
         self.model_dir = model_dir
         self.run_config = run_config
         self.initial_keras_weights = initial_keras_weights
