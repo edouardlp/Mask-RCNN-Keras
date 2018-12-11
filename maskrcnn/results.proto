@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+message Result {
+    
+    message Origin {
+        double x = 1;
+        double y = 2;
+    }
+    
+    message Size {
+        double width = 1;
+        double height = 2;
+    }
+    
+    message Rect {
+        Origin origin = 1;
+        Size size = 2;
+    }
+    
+    message ImageInfo {
+        string datasetId = 1;
+        string id = 2;
+        int32 width = 3;
+        int32 height = 4;
+    }
+    
+    ImageInfo imageInfo = 1;
+    
+    message Detection {
+        double probability = 1;
+        int32 classId = 2;
+        string classLabel = 3;
+        Rect boundingBox = 4;
+    }
+    
+    repeated Detection detections = 2;
+}
+
+message Results {
+    repeated Result results = 1;
+}

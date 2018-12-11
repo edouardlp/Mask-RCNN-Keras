@@ -112,3 +112,31 @@ def scale_box(box, horizontal_scale, vertical_scale):
     width = width * horizontal_scale
     height = height * vertical_scale
     return [x1, y1, width, height]
+
+def remove_box_padding_and_scale(box, original_shape, input_shape):
+
+    original_width = original_shape[0]
+    original_height = original_shape[1]
+
+    input_width = input_shape[0]
+    input_height = input_shape[1]
+
+    horizontal_scale = original_width / input_width
+    vertical_scale = original_height / input_height
+
+    scale = max(horizontal_scale, vertical_scale)
+
+    denormalization_scale = original_width if horizontal_scale > vertical_scale else original_height
+
+    input_width_in_original_size = input_width*scale
+    input_height_in_original_size = input_height*scale
+
+    horizontal_padding = (input_width_in_original_size-original_width)/2
+    vertical_padding = (input_height_in_original_size-original_height)/2
+
+    x = box[0]*denormalization_scale-horizontal_padding
+    y = box[1]*denormalization_scale-vertical_padding
+    width = box[2]*denormalization_scale
+    height = box[3]*denormalization_scale
+
+    return [x,y,width,height]

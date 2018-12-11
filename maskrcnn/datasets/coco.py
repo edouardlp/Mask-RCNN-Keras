@@ -11,6 +11,7 @@ from ..utils import normalized_image_shape_and_padding
 from ..utils import denormalize_box
 from ..utils import crop_box_to_outer_box
 from ..utils import scale_box
+from ..utils import remove_box_padding_and_scale
 
 class COCODataset():
 
@@ -94,29 +95,22 @@ class COCODataset():
         coco_results = []
         image_ids = []
 
-        for result in results:
-            id = int(result.image_info.id)
-            image_bounding_box = result.image_info.bounding_box
-            image_original_shape = result.image_info.original_shape
+        for result in results.results:
+            id = int(result.imageInfo.id)
+            image_original_shape = (result.imageInfo.width,result.imageInfo.height)
             image_ids.append(id)
             for detection in result.detections:
-                denormed_bounding_box = denormalize_box(detection.bounding_box,
-                                                              self.image_shape)
-                denormed_image_bounding_box = denormalize_box(image_bounding_box,
-                                                              self.image_shape)
-                cropped_box = crop_box_to_outer_box(denormed_bounding_box, denormed_image_bounding_box)
 
-                horizontal_scale = image_original_shape[1]/self.image_shape[1]
-                vertical_scale = image_original_shape[0]/self.image_shape[0]
-
-                scale = max(horizontal_scale,vertical_scale)
-
-                scaled_box = scale_box(cropped_box, scale, scale)
-
+                box = remove_box_padding_and_scale([detection.boundingBox.origin.x,
+                                                  detection.boundingBox.origin.y,
+                                                  detection.boundingBox.size.width,
+                                                  detection.boundingBox.size.height],
+                                                 image_original_shape,
+                                                 self.image_shape)
                 coco_result = {"image_id": id,
-                               "category_id" : mapping[detection.class_id],
+                               "category_id" : mapping[detection.classId],
                                "score" : detection.probability,
-                               "bbox" : list(np.around(scaled_box, 1))}
+                               "bbox" : list(np.around(box, 1))}
                 coco_results.append(coco_result)
 
         import json

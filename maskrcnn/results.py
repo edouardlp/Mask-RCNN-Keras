@@ -1,58 +1,25 @@
 import numpy as np
 
-class MaskRCNNImageInfo():
-
-    def __init__(self,
-                 id,
-                 bounding_box,
-                 original_shape):
-
-        self.id = id
-        self.bounding_box = bounding_box
-        self.original_shape = original_shape
-
-
-class MaskRCNNResult():
-
-    def __init__(self,
-                 dataset_id,
-                 image_info,
-                 detections):
-
-        self.dataset_id = dataset_id
-        self.image_info = image_info
-        self.detections = detections
-
-class MaskRCNNDetectionResult():
-
-    def __init__(self,
-                 probability,
-                 class_id,
-                 class_label,
-                 bounding_box,
-                 mask):
-        self.probability = probability
-        self.class_id = class_id
-        self.class_label = class_label
-        self.bounding_box = bounding_box
-        self.mask = mask
+from maskrcnn import results_pb2
 
 def _results_from_tensor_values(values,
                                 dataset_id,
                                 class_label_fn):
 
-    results = []
+    results = results_pb2.Results()
+
     for index,value in enumerate(values):
+
         id = value["input_id"].decode('utf-8')
-        image_info = MaskRCNNImageInfo(id,
-                                       np.copy(value["input_image_bounding_box"]),
-                                       np.copy(value["input_original_shape"]))
+
+        result = results.results.add()
+        result.imageInfo.datasetId = dataset_id
+        result.imageInfo.id = id
+        original_shape = value["input_original_shape"]
+        result.imageInfo.width = int(original_shape[0])
+        result.imageInfo.height = int(original_shape[1])
 
         raw_detections = np.copy(value["detections"])
-        #masks = value["masks"]
-
-        detections = []
-
         for i in range(0, raw_detections.shape[0]):
             raw_detection = raw_detections[i]
             # mask = masks[i]
@@ -60,16 +27,18 @@ def _results_from_tensor_values(values,
             if (class_id == 0):
                 continue
             probability = float(raw_detection[5])
-            bounding_box = raw_detection[0:4].tolist()
-            detection = MaskRCNNDetectionResult(probability=probability,
-                                                class_id=class_id,
-                                                class_label=class_label_fn(class_id),
-                                                bounding_box=bounding_box,
-                                                mask=[])
-            detections.append(detection)
+            y1 = raw_detection[0]
+            x1 = raw_detection[1]
+            y2 = raw_detection[2]
+            x2 = raw_detection[3]
 
-        result = MaskRCNNResult(dataset_id=dataset_id,
-                                    image_info=image_info,
-                                    detections=detections)
-        results.append(result)
+            detection = result.detections.add()
+            detection.probability = probability
+            detection.classId = class_id
+            detection.classLabel = class_label_fn(class_id)
+            detection.boundingBox.origin.x = x1
+            detection.boundingBox.origin.y = y1
+            detection.boundingBox.size.width = y2-y1
+            detection.boundingBox.size.height = x2-x1
+
     return results
